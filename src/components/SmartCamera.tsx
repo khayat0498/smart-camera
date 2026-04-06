@@ -50,13 +50,11 @@ export default function SmartCamera() {
 
   // ── Nuqtalarni to'g'ri tartiblash (TL, TR, BR, BL) ──────────
   function orderCorners(points: Point[]): Point[] {
-    // Markazni hisoblash
     const center = {
       x: points.reduce((sum, p) => sum + p.x, 0) / 4,
       y: points.reduce((sum, p) => sum + p.y, 0) / 4
     }
     
-    // Burchaklarni markazga nisbatan burchak bo'yicha tartiblash
     return [...points].sort((a, b) => {
       const angleA = Math.atan2(a.y - center.y, a.x - center.x)
       const angleB = Math.atan2(b.y - center.y, b.x - center.x)
@@ -71,10 +69,8 @@ export default function SmartCamera() {
     result.height = canvas.height
     const ctx = result.getContext('2d')!
     
-    // Asl rasmni chizish
     ctx.drawImage(canvas, 0, 0)
     
-    // Kontrast va yorqinlikni oshirish
     const imageData = ctx.getImageData(0, 0, result.width, result.height)
     const data = imageData.data
     
@@ -82,9 +78,9 @@ export default function SmartCamera() {
     const brightness = 10
     
     for (let i = 0; i < data.length; i += 4) {
-      data[i] = Math.min(255, Math.max(0, (data[i] - 128) * contrast + 128 + brightness))     // R
-      data[i+1] = Math.min(255, Math.max(0, (data[i+1] - 128) * contrast + 128 + brightness)) // G
-      data[i+2] = Math.min(255, Math.max(0, (data[i+2] - 128) * contrast + 128 + brightness)) // B
+      data[i] = Math.min(255, Math.max(0, (data[i] - 128) * contrast + 128 + brightness))
+      data[i+1] = Math.min(255, Math.max(0, (data[i+1] - 128) * contrast + 128 + brightness))
+      data[i+2] = Math.min(255, Math.max(0, (data[i+2] - 128) * contrast + 128 + brightness))
     }
     
     ctx.putImageData(imageData, 0, 0)
@@ -99,7 +95,6 @@ export default function SmartCamera() {
     setIsSnapping(true)
     
     try {
-      // 1. Asl rasmni olish
       const fullCanvas = document.createElement('canvas')
       fullCanvas.width = video.videoWidth
       fullCanvas.height = video.videoHeight
@@ -108,7 +103,6 @@ export default function SmartCamera() {
       
       const srcMat = cv.imread(fullCanvas)
       
-      // 2. Kontur nuqtalarini olish (AW, AH koordinatalarida)
       const rawCorners: Point[] = []
       for (let i = 0; i < contourRef.current.rows; i++) {
         rawCorners.push({
@@ -117,7 +111,6 @@ export default function SmartCamera() {
         })
       }
       
-      // 3. Nuqtalarni asl video o'lchamiga o'tkazish
       const ratioX = video.videoWidth / AW
       const ratioY = video.videoHeight / AH
       
@@ -126,7 +119,6 @@ export default function SmartCamera() {
         y: c.y * ratioY
       }))
       
-      // 4. To'g'ri tartiblash: top-left, top-right, bottom-right, bottom-left
       const ordered = orderCorners(corners)
       
       const tl = ordered[0]
@@ -134,7 +126,6 @@ export default function SmartCamera() {
       const br = ordered[2]
       const bl = ordered[3]
       
-      // 5. Perspektiva uchun o'lchamlarni hisoblash
       const widthTop = Math.hypot(tr.x - tl.x, tr.y - tl.y)
       const widthBottom = Math.hypot(br.x - bl.x, br.y - bl.y)
       const width = Math.max(widthTop, widthBottom)
@@ -143,7 +134,6 @@ export default function SmartCamera() {
       const heightRight = Math.hypot(br.x - tr.x, br.y - tr.y)
       const height = Math.max(heightLeft, heightRight)
       
-      // 6. Perspektiva matritsasini yaratish
       const srcPoints = cv.matFromArray(4, 1, cv.CV_32FC2, [
         tl.x, tl.y,
         tr.x, tr.y,
@@ -160,22 +150,18 @@ export default function SmartCamera() {
       
       const perspectiveMat = cv.getPerspectiveTransform(srcPoints, dstPoints)
       
-      // 7. Perspektivani to'g'irlash
       const warpedMat = new cv.Mat()
       cv.warpPerspective(srcMat, warpedMat, perspectiveMat, new cv.Size(width, height))
       
-      // 8. Rasmlarni canvasga o'tkazish
       const warpedCanvas = document.createElement('canvas')
       cv.imshow(warpedCanvas, warpedMat)
       
-      // 9. Xotirani tozalash
       srcMat.delete()
       warpedMat.delete()
       perspectiveMat.delete()
       srcPoints.delete()
       dstPoints.delete()
       
-      // 10. Sifatni oshirish
       const finalCanvas = enhanceImage(warpedCanvas)
       
       return finalCanvas.toDataURL('image/jpeg', 0.95)
@@ -191,8 +177,10 @@ export default function SmartCamera() {
   // ── Konturni chizish ─────────────────────────────────────
   function drawBorder(contour: any, isStable: boolean) {
     const overlay = overlayRef.current
-    const ctx = overlay?.getContext('2d')
-    if (!overlay || !ctx) return
+    if (!overlay) return
+    
+    const ctx = overlay.getContext('2d')
+    if (!ctx) return
 
     const W = overlay.width
     const H = overlay.height
@@ -256,7 +244,8 @@ export default function SmartCamera() {
     const analysisCanvas = document.createElement('canvas')
     analysisCanvas.width = AW
     analysisCanvas.height = AH
-    const analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true })!
+    const analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true })
+    if (!analysisCtx) return
 
     let stableCount = 0
     let isCooldown = false
@@ -264,13 +253,17 @@ export default function SmartCamera() {
     let intervalId: ReturnType<typeof setInterval>
 
     function analyze() {
-      if (video.readyState < 2 || isCooldown || isSnapping) return
+      const videoElement = videoRef.current
+      const overlayElement = overlayRef.current
+      
+      if (!videoElement || !overlayElement) return
+      if (videoElement.readyState < 2 || isCooldown || isSnapping) return
 
-      const rect = video.getBoundingClientRect()
-      if (overlay.width !== Math.round(rect.width)) overlay.width = Math.round(rect.width)
-      if (overlay.height !== Math.round(rect.height)) overlay.height = Math.round(rect.height)
+      const rect = videoElement.getBoundingClientRect()
+      if (overlayElement.width !== Math.round(rect.width)) overlayElement.width = Math.round(rect.width)
+      if (overlayElement.height !== Math.round(rect.height)) overlayElement.height = Math.round(rect.height)
 
-      analysisCtx.drawImage(video, 0, 0, AW, AH)
+      analysisCtx!.drawImage(videoElement, 0, 0, AW, AH);
       
       const src = cv.imread(analysisCanvas)
       const gray = new cv.Mat()
@@ -314,14 +307,13 @@ export default function SmartCamera() {
         c.delete()
       }
       
-      // Agar 4 burchakli bo'lmasa, bounding rect ishlatamiz
       if (bestContour && bestContour.rows !== 4) {
-        const rect = cv.boundingRect(bestContour)
+        const rectBox = cv.boundingRect(bestContour)
         const rectContour = cv.matFromArray(4, 1, cv.CV_32SC2, [
-          rect.x, rect.y,
-          rect.x + rect.width, rect.y,
-          rect.x + rect.width, rect.y + rect.height,
-          rect.x, rect.y + rect.height
+          rectBox.x, rectBox.y,
+          rectBox.x + rectBox.width, rectBox.y,
+          rectBox.x + rectBox.width, rectBox.y + rectBox.height,
+          rectBox.x, rectBox.y + rectBox.height
         ])
         bestContour.delete()
         bestContour = rectContour
@@ -405,10 +397,12 @@ export default function SmartCamera() {
       })
       .then(s => {
         stream = s
-        video.srcObject = s
-        video.onloadedmetadata = () => {
-          video.play()
-          intervalId = setInterval(analyze, 150)
+        if (video) video.srcObject = s
+        if (video) {
+          video.onloadedmetadata = () => {
+            video.play()
+            intervalId = setInterval(analyze, 150)
+          }
         }
       })
       .catch(err => {
