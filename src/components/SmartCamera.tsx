@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import './SmartCamera.css'
 
 // @ts-expect-error - cv is loaded from opencv.js script
-const cv = window.cv
+const getCV = () => window.cv
 
 /* ─────────────────────────────────────────────────────────────
    Types & Constants
@@ -15,11 +15,9 @@ interface Photo {
 
 type Point = { x: number, y: number }
 
-const AW = 320, AH = 240          // Tahlil o'lchami (kattaroq = aniqroq)
-const STABLE_N = 8                 // 8 × 100ms = 800ms stabil → snap
-const COOLDOWN_MS = 2000           // Snap'dan keyin kutish
-const MIN_AREA_PERCENT = 15        // Minimal maydon (kameraning 15%)
-const MAX_AREA_PERCENT = 85        // Maksimal maydon (kameraning 85%)
+const AW = 320, AH = 240
+const MIN_AREA_PERCENT = 5
+const MAX_AREA_PERCENT = 95
 
 /* ─────────────────────────────────────────────────────────────
    Component
@@ -34,6 +32,7 @@ export default function SmartCamera() {
   const [label,       setLabel]       = useState('OpenCV yuklanmoqda...')
   const [isCvReady,   setIsCvReady]   = useState(false)
   const [isSnapping,  setIsSnapping]  = useState(false)
+  const [detected,    setDetected]    = useState(false)
 
   // ── OpenCV tayyor bo'lishini kutish ──────────────────────
   useEffect(() => {
@@ -89,6 +88,7 @@ export default function SmartCamera() {
 
   // ── Rasmga olish va perspektivani to'g'irlash ──────────────
   async function captureAndCorrect(): Promise<string | null> {
+    const cv = getCV()
     const video = videoRef.current
     if (!video || video.readyState < 2 || !contourRef.current) return null
     
@@ -247,17 +247,16 @@ export default function SmartCamera() {
     const analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true })
     if (!analysisCtx) return
 
-    let stableCount = 0
-    let isCooldown = false
     let stream: MediaStream
     let intervalId: ReturnType<typeof setInterval>
 
     function analyze() {
+      const cv = getCV()
       const videoElement = videoRef.current
       const overlayElement = overlayRef.current
       
       if (!videoElement || !overlayElement) return
-      if (videoElement.readyState < 2 || isCooldown || isSnapping) return
+      if (videoElement.readyState < 2) return
 
       const rect = videoElement.getBoundingClientRect()
       if (overlayElement.width !== Math.round(rect.width)) overlayElement.width = Math.round(rect.width)
@@ -273,7 +272,7 @@ export default function SmartCamera() {
       cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0)
       
       const thresh = new cv.Mat()
-      cv.adaptiveThreshold(blurred, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2)
+      cv.adaptiveThreshold(blurred, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 21, 4)
       
       const kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3))
       const morphed = new cv.Mat()
@@ -322,59 +321,16 @@ export default function SmartCamera() {
       if (contourRef.current) contourRef.current.delete()
       contourRef.current = bestContour
       
-      const detected = bestContour !== null
-      
-      if (detected && !isCooldown) {
-        stableCount++
-        const isStable = stableCount >= STABLE_N
-        
-        drawBorder(bestContour, isStable)
-        
-        if (isStable) {
-          setLabel('✅ Barqaror! Skanerlanmoqda...')
-          isCooldown = true
-          
-          captureAndCorrect().then(dataUrl => {
-            if (dataUrl) {
-              const newPhoto: Photo = {
-                id: Date.now().toString(),
-                dataUrl,
-                timestamp: Date.now()
-              }
-              setPhotos(prev => [...prev, newPhoto])
-              setLabel('✓ Skanerlandi!')
-              
-              setTimeout(() => {
-                isCooldown = false
-                stableCount = 0
-                setLabel('🔍 Yana skanerlash...')
-              }, COOLDOWN_MS)
-            } else {
-              isCooldown = false
-              stableCount = 0
-              setLabel('❌ Xatolik, qayta urining')
-              setTimeout(() => {
-                setLabel('🔍 Skanerlanmoqda...')
-              }, 1000)
-            }
-          })
-        } else {
-          const areaPercent = (maxArea / frameArea) * 100
-          if (areaPercent < MIN_AREA_PERCENT) {
-            setLabel('📱 Kamerani yaqinlashtiring')
-          } else if (areaPercent > MAX_AREA_PERCENT) {
-            setLabel('📱 Kamerani uzoqlashtiring')
-          } else {
-            setLabel('📄 Hujjat aniqlandi, biroz turing...')
-          }
-          drawBorder(bestContour, false)
-        }
-      } else if (!isCooldown) {
-        stableCount = 0
-        drawBorder(null, false)
-        setLabel('🔍 Hujjatni ramkaga joylashtiring')
+      const isDetected = bestContour !== null
+
+      if (isDetected) {
+        drawBorder(bestContour, true)
+        setDetected(true)
+        setLabel('📄 Hujjat aniqlandi')
       } else {
-        drawBorder(bestContour, false)
+        drawBorder(null, false)
+        setDetected(false)
+        setLabel('🔍 Hujjatni ko\'rsating')
       }
       
       src.delete()
@@ -388,21 +344,31 @@ export default function SmartCamera() {
     }
 
     navigator.mediaDevices
-      .getUserMedia({ 
-        video: { 
-          facingMode: 'environment',
+      .getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
           width: { ideal: 1920 },
           height: { ideal: 1080 }
-        } 
+        }
       })
       .then(s => {
         stream = s
-        if (video) video.srcObject = s
-        if (video) {
-          video.onloadedmetadata = () => {
-            video.play()
+        if (!video) return
+        video.srcObject = s
+
+        const startAnalysis = () => {
+          video.play().then(() => {
             intervalId = setInterval(analyze, 150)
-          }
+          }).catch(err => {
+            console.error('Play error:', err)
+            setLabel('❌ Video xatosi: ' + err.message)
+          })
+        }
+
+        if (video.readyState >= 2) {
+          startAnalysis()
+        } else {
+          video.addEventListener('loadedmetadata', startAnalysis, { once: true })
         }
       })
       .catch(err => {
@@ -415,7 +381,7 @@ export default function SmartCamera() {
       if (stream) stream.getTracks().forEach(track => track.stop())
       if (contourRef.current) contourRef.current.delete()
     }
-  }, [isCvReady, isSnapping])
+  }, [isCvReady])
 
   // ── Rasmni o'chirish ───────────────────────────────────
   function deletePhoto(id: string) {
@@ -457,9 +423,27 @@ export default function SmartCamera() {
           <canvas ref={overlayRef} className='overlay' />
           
           <div className={`statusPill ${isSnapping ? 'snapping' : ''}`}>
-            <span className={`statusDot ${label.includes('✅') ? 'green' : label.includes('📄') ? 'blue' : 'gray'}`} />
+            <span className={`statusDot ${detected ? 'green' : 'gray'}`} />
             {label}
           </div>
+
+          <button
+            className={`captureBtn ${detected ? 'active' : ''}`}
+            disabled={!detected || isSnapping}
+            onClick={() => {
+              captureAndCorrect().then(dataUrl => {
+                if (dataUrl) {
+                  setPhotos(prev => [...prev, {
+                    id: Date.now().toString(),
+                    dataUrl,
+                    timestamp: Date.now()
+                  }])
+                }
+              })
+            }}
+          >
+            📸
+          </button>
         </div>
       </div>
 

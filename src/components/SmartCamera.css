@@ -60,6 +60,33 @@
   transform: translateX(-50%) scale(1.05);
 }
 
+.captureBtn {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.3);
+  background: rgba(255,255,255,0.15);
+  font-size: 28px;
+  cursor: pointer;
+  opacity: 0.4;
+  transition: all 0.2s;
+  backdrop-filter: blur(4px);
+}
+
+.captureBtn.active {
+  opacity: 1;
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.25);
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.5);
+}
+
+.captureBtn.active:active {
+  transform: scale(0.92);
+}
+
 .statusDot {
   width: 8px;
   height: 8px;
